@@ -1,21 +1,19 @@
-# safeTap/api/views.py
-
-# 1. IMPORTS - This is the most important part
+# api/views.py
 from django.http import HttpResponse
-from rest_framework import viewsets, status  # <-- This line is crucial for 'viewsets'
+from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import api_view, action
-from rest_framework.permissions import  IsAuthenticatedOrReadOnly
+from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.authtoken.models import Token
 
-from .models import Post, City, TechSpec
+from .models import Post, City, TechSpec, Division, District, Thana
 from .serializers import (
     CitySerializer, CitySlideSerializer, CityStatsSerializer, 
-    ProductSerializer, TechSpecSerializer, PostSerializer
+    ProductSerializer, TechSpecSerializer, PostSerializer,
+    DivisionSerializer, DistrictSerializer, ThanaSerializer, BangladeshDataSerializer
 )
 
-# 2. FUNCTION-BASED VIEWS
 def home(request):
     return HttpResponse('hello api')
 
@@ -41,7 +39,6 @@ def post_list(request):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# 3. CLASS-BASED VIEWS
 class CustomAuthToken(ObtainAuthToken):
     def post(self, request, *args, **kwargs):
         serializer = self.serializer_class(data=request.data, context={'request': request})
@@ -184,3 +181,118 @@ class TechSpecViewSet(viewsets.ModelViewSet):
         return TechSpec.objects.bulk_create(
             [TechSpec(**item) for item in serializer.validated_data]
         )
+
+# New viewsets for geographical data
+class DivisionViewSet(viewsets.ModelViewSet):
+    queryset = Division.objects.all()
+    serializer_class = DivisionSerializer
+    permission_classes = [permissions.AllowAny]
+    # permission_classes = [IsAuthenticatedOrReadOnly]
+    
+    @action(detail=False, methods=['post'])
+    def bulk_import(self, request):
+        """
+        Bulk import Bangladesh geographical data
+        """
+        data = request.data
+        
+        if not isinstance(data, list):
+            return Response(
+                {"error": "Data should be a list of geographical entries"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        created_divisions = 0
+        created_districts = 0
+        created_thanas = 0
+        errors = []
+        
+        for entry in data:
+            try:
+                # Create or get division
+                division, created = Division.objects.get_or_create(
+                    name=entry['division']
+                )
+                if created:
+                    created_divisions += 1
+                
+                # Create or get district
+                district, created = District.objects.get_or_create(
+                    name=entry['district'],
+                    division=division
+                )
+                if created:
+                    created_districts += 1
+                
+                # Create thanas
+                for thana_name in entry['thanas']:
+                    thana, created = Thana.objects.get_or_create(
+                        name=thana_name,
+                        district=district
+                    )
+                    if created:
+                        created_thanas += 1
+                        
+            except Exception as e:
+                errors.append({
+                    'entry': entry.get('_id', 'Unknown'),
+                    'error': str(e)
+                })
+        
+        response_data = {
+            'created_divisions': created_divisions,
+            'created_districts': created_districts,
+            'created_thanas': created_thanas,
+            'total_entries_processed': len(data)
+        }
+        
+        if errors:
+            response_data['errors'] = errors
+            return Response(response_data, status=status.HTTP_207_MULTI_STATUS)
+        
+        return Response(response_data, status=status.HTTP_201_CREATED)
+
+class DistrictViewSet(viewsets.ModelViewSet):
+    queryset = District.objects.all()
+    serializer_class = DistrictSerializer
+    permission_classes = [permissions.AllowAny]
+    # permission_classes = [IsAuthenticatedOrReadOnly]
+    
+    def get_queryset(self):
+        queryset = District.objects.all()
+        division_id = self.request.query_params.get('division_id', None)
+        if division_id is not None:
+            queryset = queryset.filter(division_id=division_id)
+        return queryset
+
+class ThanaViewSet(viewsets.ModelViewSet):
+    queryset = Thana.objects.all()
+    serializer_class = ThanaSerializer
+    permission_classes= [permissions.AllowAny]
+    # permission_classes = [IsAuthenticatedOrReadOnly]
+    
+    def get_queryset(self):
+        queryset = Thana.objects.all()
+        district_id = self.request.query_params.get('district_id', None)
+        if district_id is not None:
+            queryset = queryset.filter(district_id=district_id)
+        return queryset
+
+@api_view(['GET'])
+def bangladesh_data(request):
+    """
+    Get all Bangladesh geographical data
+    """
+    divisions = Division.objects.all()
+    result = []
+    
+    for division in divisions:
+        for district in division.districts.all():
+            thanas = [thana.name for thana in district.thanas.all()]
+            result.append({
+                'division': division.name,
+                'district': district.name,
+                'thanas': thanas
+            })
+    
+    return Response(result)

@@ -24,6 +24,8 @@ SECRET_KEY = 'django-insecure-^ud5hzj0!3(1kc_j_5)g*6_3a))m932nd5a1oackv1kzj-*=ch
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
+CORS_ALLOW_CREDENTIALS = True
+
 
 ALLOWED_HOSTS = []
 
@@ -51,6 +53,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
 ]
 
 ROOT_URLCONF = 'safeTap.urls'

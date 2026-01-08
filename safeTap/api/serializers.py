@@ -1,21 +1,33 @@
 # api/serializers.py
 from rest_framework import serializers
-from .models import City, CitySlide, CityStats, Product, TechSpec, Post
+from .models import Post, City, CitySlide, CityStats, Product, TechSpec, Division, District, Thana
+
+class PostSerializer(serializers.ModelSerializer):
+    author = serializers.ReadOnlyField(source='author.username')
+    
+    class Meta:
+        model = Post
+        fields = ['id', 'title', 'content', 'author', 'created_at', 'updated_at']
 
 class CitySlideSerializer(serializers.ModelSerializer):
     class Meta:
         model = CitySlide
-        fields = ['id', 'title', 'subtitle', 'description', 'image', 'color']
+        fields = '__all__'
 
 class CityStatsSerializer(serializers.ModelSerializer):
     class Meta:
         model = CityStats
-        fields = ['users', 'rating', 'installations']
+        fields = '__all__'
 
 class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
-        fields = ['name', 'price', 'features', 'description']
+        fields = '__all__'
+
+class TechSpecSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TechSpec
+        fields = '__all__'
 
 class CitySerializer(serializers.ModelSerializer):
     slides = CitySlideSerializer(many=True, read_only=True)
@@ -26,15 +38,28 @@ class CitySerializer(serializers.ModelSerializer):
         model = City
         fields = ['id', 'name', 'slug', 'slides', 'stats', 'products']
 
-class TechSpecSerializer(serializers.ModelSerializer):
+# New serializers for geographical data
+class ThanaSerializer(serializers.ModelSerializer):
     class Meta:
-        model = TechSpec
-        fields = ['id', 'icon_name', 'title', 'details']
+        model = Thana
+        fields = ['id', 'name', 'district']
 
-class PostSerializer(serializers.ModelSerializer):
-    author_name = serializers.CharField(source='author.username', read_only=True)
+class DistrictSerializer(serializers.ModelSerializer):
+    thanas = ThanaSerializer(many=True, read_only=True)
     
     class Meta:
-        model = Post
-        fields = ['id', 'title', 'content', 'author', 'author_name', 'created_at', 'updated_at']
-        read_only_fields = ['author', 'created_at', 'updated_at']
+        model = District
+        fields = ['id', 'name', 'division', 'thanas']
+
+class DivisionSerializer(serializers.ModelSerializer):
+    districts = DistrictSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = Division
+        fields = ['id', 'name', 'districts']
+
+class BangladeshDataSerializer(serializers.Serializer):
+    _id = serializers.CharField(max_length=20)
+    division = serializers.CharField(max_length=100)
+    district = serializers.CharField(max_length=100)
+    thanas = serializers.ListField(child=serializers.CharField(max_length=100))

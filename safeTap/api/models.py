@@ -53,3 +53,38 @@ class TechSpec(models.Model):
     
     def __str__(self):
         return self.title
+
+# New models for Bangladesh geographical data
+class Division(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+    
+    def __str__(self):
+        return self.name
+    
+    class Meta:
+        verbose_name = "Division"
+        verbose_name_plural = "Divisions"
+
+class District(models.Model):
+    name = models.CharField(max_length=100)
+    division = models.ForeignKey(Division, on_delete=models.CASCADE, related_name='districts')
+    
+    def __str__(self):
+        return f"{self.name}, {self.division.name}"
+    
+    class Meta:
+        unique_together = ('name', 'division')
+        verbose_name = "District"
+        verbose_name_plural = "Districts"
+
+class Thana(models.Model):
+    name = models.CharField(max_length=100)
+    district = models.ForeignKey(District, on_delete=models.CASCADE, related_name='thanas')
+    
+    def __str__(self):
+        return f"{self.name}, {self.district.name}"
+    
+    class Meta:
+        unique_together = ('name', 'district')
+        verbose_name = "Thana"
+        verbose_name_plural = "Thanas"
