@@ -1,18 +1,24 @@
 # api/views.py
 from django.http import HttpResponse
 from rest_framework import viewsets, status, permissions
-from rest_framework.decorators import api_view, action
+from rest_framework.decorators import api_view, action, permission_classes
 from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.authtoken.models import Token
+from django.contrib.auth import authenticate
 
-from .models import Post, City, TechSpec, Division, District, Thana
+from .models import Post, City, TechSpec, Division, District, Thana, ProductFeature, UserProfile
+from rest_framework_simplejwt.tokens import RefreshToken
 from .serializers import (
     CitySerializer, CitySlideSerializer, CityStatsSerializer, 
     ProductSerializer, TechSpecSerializer, PostSerializer,
-    DivisionSerializer, DistrictSerializer, ThanaSerializer, BangladeshDataSerializer
+    DivisionSerializer, DistrictSerializer, ThanaSerializer, BangladeshDataSerializer, 
+    ProductFeatureSerializer, UserRegistrationSerializer, 
+    PhoneVerificationSerializer, CodeVerificationSerializer,
+    SupportLinkSerializer
 )
+from .services import generate_verification_code, send_sms_verification
 
 def home(request):
     return HttpResponse('hello api')
@@ -296,3 +302,154 @@ def bangladesh_data(request):
             })
     
     return Response(result)
+
+class ProductFeatureViewSet(viewsets.ModelViewSet):
+    queryset = ProductFeature.objects.all()
+    serializer_class = ProductFeatureSerializer
+    permission_classes = [permissions.AllowAny]
+    
+    @action(detail=False, methods=['get'])
+    def active_features(self, request):
+        """
+        Get only active product features
+        """
+        active_features = ProductFeature.objects.all()
+        serializer = self.get_serializer(active_features, many=True)
+        return Response(serializer.data)
+    
+    def create(self, request, *args, **kwargs):
+        """
+        Handle both single and bulk creation
+        """
+        if isinstance(request.data, list):
+            # Bulk creation
+            return self.bulk_create(request, *args, **kwargs)
+        else:
+            # Single creation
+            return super().create(request, *args, **kwargs)
+    
+    def bulk_create(self, request, *args, **kwargs):
+        """
+        Handle bulk creation of product features
+        """
+        serializer = self.get_serializer(data=request.data, many=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_bulk_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+    
+    def perform_bulk_create(self, serializer):
+        """
+        Perform the bulk creation
+        """
+        ProductFeature.objects.bulk_create([
+            ProductFeature(**item) for item in serializer.validated_data
+        ])
+
+# Authentication and User Registration Views
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def register_user(request):
+    """Register a new user and send verification code"""
+    serializer = UserRegistrationSerializer(data=request.data)
+    if serializer.is_valid():
+        user = serializer.save()
+        
+        # Generate and send verification code
+        profile = user.profile
+        code = generate_verification_code()
+        profile.verification_code = code
+        profile.save()
+        
+        # Send SMS (you might want to handle this asynchronously)
+        send_sms_verification(profile.phone, code)
+        
+        # Generate support link and QR code
+        profile.generate_support_link()
+        profile.generate_qr_code()
+        
+        return Response({
+            'message': 'User registered successfully. Please verify your phone number.',
+            'user_id': user.id,
+            'phone': profile.phone
+        }, status=status.HTTP_201_CREATED)
+    
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def send_verification_code(request):
+    """Send verification code to a phone number"""
+    serializer = PhoneVerificationSerializer(data=request.data)
+    if serializer.is_valid():
+        phone = serializer.validated_data['phone']
+        profile = UserProfile.objects.get(phone=phone)
+        
+        # Generate and send new verification code
+        code = generate_verification_code()
+        profile.verification_code = code
+        profile.save()
+        
+        # Send SMS
+        if send_sms_verification(phone, code):
+            return Response({'message': 'Verification code sent successfully'})
+        else:
+            return Response(
+                {'error': 'Failed to send verification code'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def verify_code(request):
+    """Verify the phone number with the code"""
+    serializer = CodeVerificationSerializer(data=request.data)
+    if serializer.is_valid():
+        phone = serializer.validated_data['phone']
+        profile = UserProfile.objects.get(phone=phone)
+        
+        # Mark phone as verified
+        profile.is_phone_verified = True
+        profile.verification_code = None  # Clear the code
+        profile.save()
+        
+        # Generate JWT tokens
+        refresh = RefreshToken.for_user(profile.user)
+        access_token = str(refresh.access_token)
+        
+        # Get support link and QR code
+        support_link = profile.support_link or profile.generate_support_link()
+        qr_code = profile.qr_code or profile.generate_qr_code()
+        
+        return Response({
+            'message': 'Phone number verified successfully',
+            'access': access_token,
+            'refresh': str(refresh),
+            'user': {
+                'id': profile.user.id,
+                'username': profile.user.username,
+                'email': profile.user.email,
+                'phone': profile.phone,
+                'role': profile.role
+            },
+            'support_link': support_link,
+            'qr_code': qr_code
+        })
+    
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def get_support_info(request):
+    """Get support link and QR code for authenticated user"""
+    profile = request.user.profile
+    
+    # Ensure support link and QR code exist
+    support_link = profile.support_link or profile.generate_support_link()
+    qr_code = profile.qr_code or profile.generate_qr_code()
+    
+    serializer = SupportLinkSerializer(profile)
+    return Response(serializer.data)

@@ -1,6 +1,6 @@
 # api/serializers.py
 from rest_framework import serializers
-from .models import Post, City, CitySlide, CityStats, Product, TechSpec, Division, District, Thana
+from .models import Post, City, CitySlide, CityStats, Product, TechSpec, Division, User, District, Thana, ProductFeature, UserProfile
 
 class PostSerializer(serializers.ModelSerializer):
     author = serializers.ReadOnlyField(source='author.username')
@@ -63,3 +63,65 @@ class BangladeshDataSerializer(serializers.Serializer):
     division = serializers.CharField(max_length=100)
     district = serializers.CharField(max_length=100)
     thanas = serializers.ListField(child=serializers.CharField(max_length=100))
+
+
+class ProductFeatureSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductFeature
+        fields = ['id', 'title', 'description', 'image']
+        
+        
+# Authentication and User Related Serializers
+class UserRegistrationSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True)
+    phone = serializers.CharField(max_length=15)
+    role = serializers.ChoiceField(choices=['customer', 'service_man', 'admin'], required=False, default='customer')
+    
+    class Meta:
+        model = User
+        fields = ('username', 'email', 'password', 'first_name', 'last_name', 'phone', 'role')
+    
+    def create(self, validated_data):
+        phone = validated_data.pop('phone')
+        role = validated_data.pop('role', 'customer')
+        password = validated_data.pop('password')
+        
+        # Create user
+        user = User.objects.create_user(**validated_data)
+        user.set_password(password)
+        user.save()
+        
+        # Create user profile with role
+        profile = UserProfile.objects.create(user=user, phone=phone, role=role)
+        
+        return user
+
+class PhoneVerificationSerializer(serializers.Serializer):
+    phone = serializers.CharField(max_length=15)
+    
+    def validate_phone(self, value):
+        if not UserProfile.objects.filter(phone=value).exists():
+            raise serializers.ValidationError("Phone number not registered")
+        return value
+
+class CodeVerificationSerializer(serializers.Serializer):
+    phone = serializers.CharField(max_length=15)
+    code = serializers.CharField(max_length=6)
+    
+    def validate(self, attrs):
+        phone = attrs.get('phone')
+        code = attrs.get('code')
+        
+        try:
+            profile = UserProfile.objects.get(phone=phone)
+            if profile.verification_code != code:
+                raise serializers.ValidationError("Invalid verification code")
+        except UserProfile.DoesNotExist:
+            raise serializers.ValidationError("Phone number not registered")
+        
+        return attrs
+
+class SupportLinkSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserProfile
+        fields = ('support_link', 'qr_code')

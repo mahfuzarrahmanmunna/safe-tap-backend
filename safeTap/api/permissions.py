@@ -13,3 +13,42 @@ class IsAuthorOrReadOnly(permissions.BasePermission):
 
         # Write permissions are only allowed to the author of the post.
         return obj.author == request.user
+
+
+class IsAdmin(permissions.BasePermission):
+    """
+    Permission to check if user has admin role.
+    """
+    def has_permission(self, request, view):
+        return (
+            request.user and
+            request.user.is_authenticated and
+            hasattr(request.user, 'profile') and
+            request.user.profile.role == 'admin'
+        )
+
+
+class IsServiceMan(permissions.BasePermission):
+    """
+    Permission to check if user has service_man role or is admin.
+    """
+    def has_permission(self, request, view):
+        return (
+            request.user and
+            request.user.is_authenticated and
+            hasattr(request.user, 'profile') and
+            request.user.profile.role in ['service_man', 'admin']
+        )
+
+
+class IsCustomer(permissions.BasePermission):
+    """
+    Permission to check if user has customer role.
+    """
+    def has_permission(self, request, view):
+        return (
+            request.user and
+            request.user.is_authenticated and
+            hasattr(request.user, 'profile') and
+            request.user.profile.role == 'customer'
+        )
